@@ -1,0 +1,53 @@
+# AMS backend (.NET) — nothing built, published, or user-specific should
+# ever be committed; the API keeps its config out of the tree too.
+
+## Build artifacts
+bin/
+obj/
+out/
+
+## Publish output
+publish/
+*.publish.xml
+*.pubxml.user
+
+## Visual Studio / Rider / VS Code
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Rider
+*.sln.iml
+
+## NuGet
+*.nupkg
+**/packages/*
+!**/packages/build/
+*.nuget.props
+*.nuget.targets
+
+## Test results
+[Tt]est[Rr]esult*/
+[Dd]ebugPS/
+*.coverage
+*.coveragexml
+TestResults/
+
+## SQL Server / local DB artifacts
+*.mdf
+*.ldf
+*.ndf
+
+## Secrets & app-level files that must never leave the machine
+appsettings.Development.json
+**/Properties/launchSettings.json
+
+## EF tooling noise
+efpt.*.json
+
+## OS noise
+.DS_Store
+Thumbs.db
