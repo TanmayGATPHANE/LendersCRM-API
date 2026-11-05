@@ -53,6 +53,14 @@ public sealed record SearchResults(
 // ---- manual cash movements (+ into the drawer / − out) ----
 public record NewManualCashRequest(DateOnly Date, decimal Amount, string? Notes);
 
+// ---- activity (audit trail, Admin only) ----
+/// One row of the audit trail: who did what, when, to which entity. The
+/// Activity tab (Admin) lists them; a collateral group's rows power the
+/// per-transaction history panel.
+public sealed record ActivityItem(
+    int Id, DateTime AtUtc, int? UserId, string UserName,
+    string Action, string Entity, int EntityId, int? GroupId, string Details);
+
 // ---- responses ----
 public sealed record UserItem(int Id, string Name, string Email, string Role, bool IsActive);
 public sealed record CustomerItem(int Id, string Name, string Phone, string Address, int ActiveCount, decimal Outstanding);
@@ -100,3 +108,30 @@ public sealed record GroupItem(
     CustomerDetail Customer, List<EntryItem> Entries, List<PaymentItem> Payments);
 public sealed record ReleaseResult(int GroupId, int PrimaryEntryId, decimal? TotalCollected, int ReleasedCount);
 public sealed record InsightsResult(decimal TotalAmanat, decimal InterestEarned, decimal CashAvailable);
+
+// ---- Reports page (§3.6) — every row is backend-computed; the pages only display.
+
+/// One money row per month of the cash ledger: what went out, what came
+/// back, and the net the drawer gained or gave up in that month.
+public sealed record SummaryReportRow(
+    string Month, // "2026-10"
+    decimal LentOut, // Σ |Lend| rows (money out)
+    decimal PrincipalIn, // partial returns + release principal
+    decimal InterestIn, // release interest legs
+    decimal ManualIn, // manual + rows
+    decimal ManualOut, // manual − rows (positive)
+    decimal Net); // the ledger's SUM for the month (negative = drawer down)
+
+/// Per-customer lifetime track record across all their collaterals.
+public sealed record CustomerReportRow(
+    int CustomerId, string Name, string Address,
+    int Lends, int ActiveLends,
+    decimal TotalLent, decimal ReturnedPrincipal, decimal InterestCollected,
+    decimal ActiveOutstanding, decimal InterestAccruing);
+
+/// Per-released-collateral outcome: how long the money was out, what came
+/// back, and the counter's actual cash figure (§4.2).
+public sealed record ReleaseReportRow(
+    int GroupId, string Customer, string Item,
+    decimal Lent, string? ReleasedDate, int DaysHeld,
+    decimal RecoveredPrincipal, decimal InterestCollected, decimal? TotalCollected);

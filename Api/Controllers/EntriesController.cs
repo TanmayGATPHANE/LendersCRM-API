@@ -24,7 +24,7 @@ public class EntriesController : ControllerBase
     [Authorize(Policy = "Writer")]
     public async Task<IActionResult> Add(NewEntryRequest req)
     {
-        var (id, groupId) = await _entries.AddAsync(req, CurrentUser.TryId(User));
+        var (id, groupId) = await _entries.AddAsync(req, CurrentUser.Actor(User));
         return Created($"/api/entries/{id}", new { id, groupId });
     }
 
@@ -32,7 +32,7 @@ public class EntriesController : ControllerBase
     [Authorize(Policy = "Writer")]
     public async Task<IActionResult> Update(int id, UpdateEntryRequest req)
     {
-        var (_, groupId) = await _entries.UpdateAsync(id, req);
+        var (_, groupId) = await _entries.UpdateAsync(id, req, CurrentUser.Actor(User));
         return Ok(new { id, groupId });
     }
 }

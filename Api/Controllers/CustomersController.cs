@@ -23,7 +23,7 @@ public class CustomersController : ControllerBase
     [Authorize(Policy = "Writer")]
     public async Task<IActionResult> Create(NewCustomerRequest req)
     {
-        var customer = await _customers.CreateAsync(req);
+        var customer = await _customers.CreateAsync(req, CurrentUser.Actor(User));
         return Created($"/api/customers/{customer.Id}", customer);
     }
 
@@ -37,7 +37,7 @@ public class CustomersController : ControllerBase
     [Authorize(Policy = "Writer")]
     public async Task<IActionResult> Update(int id, UpdateCustomerRequest req)
     {
-        var customer = await _customers.UpdateAsync(id, req);
+        var customer = await _customers.UpdateAsync(id, req, CurrentUser.Actor(User));
         return Ok(customer);
     }
 }

@@ -1,0 +1,9 @@
+# Build context hygiene — nothing of these should enter the image.
+Api/bin/
+Api/obj/
+Data/bin/
+Data/obj/
+Data.Pg/
+deployment/
+**/*.user
+**/.vs/

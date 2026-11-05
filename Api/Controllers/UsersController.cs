@@ -18,9 +18,9 @@ public class UsersController : ControllerBase
 
     [HttpPost("/api/users")]
     public async Task<IActionResult> Create(NewUserRequest req) =>
-        Ok(await _users.CreateAsync(req));
+        Ok(await _users.CreateAsync(req, CurrentUser.Actor(User)));
 
     [HttpPut("/api/users/{id}")]
     public async Task<IActionResult> Update(int id, UpdateUserRequest req) =>
-        Ok(await _users.UpdateAsync(id, req));
+        Ok(await _users.UpdateAsync(id, req, CurrentUser.Actor(User)));
 }

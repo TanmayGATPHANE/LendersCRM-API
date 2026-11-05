@@ -24,6 +24,7 @@ builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
 builder.Services.AddScoped<IEntryRepository, EntryRepository>();
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
 builder.Services.AddScoped<ICashLedgerRepository, CashLedgerRepository>();
+builder.Services.AddScoped<IActivityRepository, ActivityRepository>();
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -34,14 +35,22 @@ builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<ICashLedgerService, CashLedgerService>();
 builder.Services.AddScoped<IGroupService, GroupService>();
 builder.Services.AddScoped<IInsightsService, InsightsService>();
+builder.Services.AddScoped<IReportsService, ReportsService>();
 builder.Services.AddScoped<ISearchService, SearchService>();
+builder.Services.AddScoped<IActivityService, ActivityService>();
 
 // ── HTTP plumbing ─────────────────────────────────────────────────────────
 builder.Services.AddControllers();
 
-// CORS for the Vite dev server (and its production preview port).
+// CORS for the Vite dev server (and its production preview port) by
+// default; deployed origins ride in via config so the same build serves
+// anywhere — Cors:AllowedOrigins (config array) or, on the host, the
+// CORS__AllowedOrigins env var (comma-separated, e.g. the Vercel URL).
+var corsOrigins = new List<string> { "http://localhost:5173", "http://localhost:4173" };
+corsOrigins.AddRange(builder.Configuration
+    .GetSection("Cors:AllowedOrigins").Get<string[]>() ?? []);
 builder.Services.AddCors(o => o.AddPolicy("frontend", p => p
-    .WithOrigins("http://localhost:5173", "http://localhost:4173")
+    .WithOrigins(corsOrigins.ToArray())
     .AllowAnyHeader().AllowAnyMethod()));
 
 // JWT Bearer auth — every business endpoint requires it; /api/users*

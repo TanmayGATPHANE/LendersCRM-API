@@ -12,4 +12,21 @@ public static class CurrentUser
                   ?? user.FindFirstValue(ClaimTypes.NameIdentifier);
         return int.TryParse(sub, out var id) ? id : null;
     }
+
+    /// The actor of a write — id plus display name (the "name" claim the
+    /// login token carries). The NAME is snapshotted into every ActivityLog
+    /// row, so the trail keeps reading right even after a user is renamed.
+    public static Actor Actor(ClaimsPrincipal user) => new(
+        TryId(user),
+        user.FindFirstValue("name") ?? "");
+
+    public static string? TryName(ClaimsPrincipal user) =>
+        user.FindFirstValue("name");
+}
+
+/// Who performed an action (id + name snapshot). Id may be null if a
+/// request ever slips through unauthenticated.
+public sealed record Actor(int? Id, string Name)
+{
+    public static readonly Actor Unknown = new(null, "");
 }

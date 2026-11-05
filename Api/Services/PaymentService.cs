@@ -6,15 +6,16 @@ namespace AMS.Api.Services;
 public interface IPaymentService
 {
     Task<List<PaymentItem>> ListAsync();
-    Task<PaymentItem> AddToGroupAsync(int groupId, NewPaymentRequest req, int? userId);
-    Task<PaymentItem> UpdateAsync(int id, UpdatePaymentRequest req);
+    Task<PaymentItem> AddToGroupAsync(int groupId, NewPaymentRequest req, Actor actor);
+    Task<PaymentItem> UpdateAsync(int id, UpdatePaymentRequest req, Actor actor);
 }
 
 /** Partial returns (plan §4.6): list all, record one against a collateral
     group, correct one. Amounts validate against the group's outstanding —
     oldest lend reduced first. */
 public sealed class PaymentService(
-    IPaymentRepository payments, IEntryRepository entries, ICashLedgerRepository cash) : IPaymentService
+    IPaymentRepository payments, IEntryRepository entries, ICashLedgerRepository cash,
+    IActivityRepository activity) : IPaymentService
 {
     public async Task<List<PaymentItem>> ListAsync()
     {
@@ -22,7 +23,7 @@ public sealed class PaymentService(
         return list.Select(PaymentMapper.ToItem).ToList();
     }
 
-    public async Task<PaymentItem> AddToGroupAsync(int groupId, NewPaymentRequest req, int? userId)
+    public async Task<PaymentItem> AddToGroupAsync(int groupId, NewPaymentRequest req, Actor actor)
     {
         var group = await entries.ListForGroupAsync(groupId);
         if (group.Count == 0) throw ApiException.NotFound("Collateral group not found");
@@ -43,7 +44,7 @@ public sealed class PaymentService(
             PaymentDate = req.Date,
             Amount = req.Amount,
             Notes = req.Notes,
-            RecordedByUserId = userId,
+            RecordedByUserId = actor.Id,
         };
         await payments.AddAsync(record);
         await payments.SaveAsync(); // the save assigns record.Id — the ledger needs it
@@ -58,10 +59,15 @@ public sealed class PaymentService(
             Notes = record.Notes,
         });
         await cash.SaveAsync();
+        // The audit row: who recorded this partial return.
+        await activity.AddAsync(actor, "Created", "Payment", record.Id, groupId,
+            $"Recorded partial return {ActivityStages.Money(req.Amount)} — " +
+            $"{group[0].ItemDescription} ({(group[0].Customer?.Name ?? $"customer #{group[0].CustomerId}")})");
+        await activity.SaveAsync();
         return PaymentMapper.ToItem(record);
     }
 
-    public async Task<PaymentItem> UpdateAsync(int id, UpdatePaymentRequest req)
+    public async Task<PaymentItem> UpdateAsync(int id, UpdatePaymentRequest req, Actor actor)
     {
         var record = await payments.FindByIdAsync(id, tracked: true)
             ?? throw ApiException.NotFound("Payment not found");
@@ -78,10 +84,24 @@ public sealed class PaymentService(
             throw ApiException.BadRequest(
                 $"Partial return cannot exceed the outstanding ₹{(activePrincipal - others).ToString("N2")}");
 
+        var oldDate = record.PaymentDate;
+        var oldAmount = record.Amount;
+        var oldNotes = record.Notes;
+
         if (req.Date is DateOnly d) record.PaymentDate = d;
         record.Amount = newAmount;
         if (req.Notes is not null) record.Notes = req.Notes;
         await payments.SaveAsync();
+
+        // Human-readable diff of the correction.
+        var changes = new List<string>();
+        if (record.PaymentDate != oldDate)
+            changes.Add($"date {oldDate:dd/MM/yyyy} → {record.PaymentDate:dd/MM/yyyy}");
+        if (record.Amount != oldAmount)
+            changes.Add($"amount {ActivityStages.Money(oldAmount)} → {ActivityStages.Money(record.Amount)}");
+        if (record.Notes != oldNotes)
+            changes.Add("notes updated");
+
         // Keep the cash ledger row (§3.5) in step with the corrected payment.
         var ledgerRow = await cash.FindForSourceAsync("PartialReturn", id, tracked: true);
         if (ledgerRow is not null)
@@ -91,6 +111,11 @@ public sealed class PaymentService(
             ledgerRow.Notes = record.Notes;
             await cash.SaveAsync();
         }
+
+        // The audit row: who corrected this partial return, and what moved.
+        await activity.AddAsync(actor, "Updated", "Payment", id, record.GroupId,
+            $"Corrected partial return — {string.Join("; ", changes)}");
+        await activity.SaveAsync();
         return PaymentMapper.ToItem(record);
     }
 }

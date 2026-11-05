@@ -6,15 +6,15 @@ namespace AMS.Api.Services;
 public interface IGroupService
 {
     Task<GroupItem> GetAsync(int groupId);
-    Task MoveCustomerAsync(int groupId, int customerId);
-    Task<ReleaseResult> ReleaseAsync(int groupId, ReleaseRequest req);
+    Task MoveCustomerAsync(int groupId, int customerId, Actor actor);
+    Task<ReleaseResult> ReleaseAsync(int groupId, ReleaseRequest req, Actor actor);
 }
 
 /** Operations on a whole collateral group: inspect it, move it (with its
     payments) to another customer, release it (plan §4.2, §4.3, §6). */
 public sealed class GroupService(
     IEntryRepository entries, IPaymentRepository payments, ICustomerRepository customers,
-    ICashLedgerRepository cash) : IGroupService
+    ICashLedgerRepository cash, IActivityRepository activity) : IGroupService
 {
     public async Task<GroupItem> GetAsync(int groupId)
     {
@@ -39,7 +39,7 @@ public sealed class GroupService(
             Payments: groupPayments.Select(PaymentMapper.ToItem).ToList());
     }
 
-    public async Task MoveCustomerAsync(int groupId, int customerId)
+    public async Task MoveCustomerAsync(int groupId, int customerId, Actor actor)
     {
         var groupEntries = await entries.ListForGroupAsync(groupId, tracked: true);
         if (groupEntries.Count == 0) throw ApiException.NotFound("Collateral group not found");
@@ -47,12 +47,20 @@ public sealed class GroupService(
             throw ApiException.Conflict("Released collateral history cannot be moved");
         if (!await customers.ExistsAsync(customerId))
             throw ApiException.NotFound("Customer not found");
+        var newOwner = await customers.FindByIdAsync(customerId);
+        var oldOwner = await customers.FindByIdAsync(groupEntries[0].CustomerId);
 
         groupEntries.ForEach(e => e.CustomerId = customerId);
         await entries.SaveAsync(); // lends + payments travel together
+
+        // The audit row: moved the whole collateral to another customer.
+        await activity.AddAsync(actor, "Updated", "Group", groupId, groupId,
+            $"Moved collateral — {groupEntries[0].ItemDescription}: " +
+            $"{oldOwner?.Name ?? $"customer #{groupEntries[0].CustomerId}"} → {newOwner?.Name ?? $"#{customerId}"}");
+        await activity.SaveAsync();
     }
 
-    public async Task<ReleaseResult> ReleaseAsync(int groupId, ReleaseRequest req)
+    public async Task<ReleaseResult> ReleaseAsync(int groupId, ReleaseRequest req, Actor actor)
     {
         var groupEntries = await entries.ListForGroupAsync(groupId, tracked: true);
         if (groupEntries.Count == 0) throw ApiException.NotFound("Collateral group not found");
@@ -110,6 +118,13 @@ public sealed class GroupService(
         // One SaveChanges ⇒ one DB transaction: the status flips, the
         // frozen interest AND the two cash-ledger rows commit together.
         await entries.SaveAsync();
+
+        // The audit row: who released this collateral and what came back.
+        await activity.AddAsync(actor, "Released", "Group", groupId, groupId,
+            $"Released collateral — {primary.ItemDescription} " +
+            $"({(primary.Customer?.Name ?? $"customer #{primary.CustomerId}")}): " +
+            $"{active.Count} lend(s), principal {ActivityStages.Money(principalBack)} + interest {ActivityStages.Money(interestBack)}");
+        await activity.SaveAsync();
         return new ReleaseResult(groupId, primary.Id, primary.TotalCollected, active.Count);
     }
 

@@ -6,12 +6,12 @@ namespace AMS.Api.Services;
 public interface IUserService
 {
     Task<List<UserItem>> ListAsync();
-    Task<UserItem> CreateAsync(NewUserRequest req);
-    Task<UserItem> UpdateAsync(int id, UpdateUserRequest req);
+    Task<UserItem> CreateAsync(NewUserRequest req, Actor actor);
+    Task<UserItem> UpdateAsync(int id, UpdateUserRequest req, Actor actor);
 }
 
 /** User management (Admin only) — plan §2/§6. */
-public sealed class UserService(IUserRepository users) : IUserService
+public sealed class UserService(IUserRepository users, IActivityRepository activity) : IUserService
 {
     public async Task<List<UserItem>> ListAsync()
     {
@@ -19,7 +19,7 @@ public sealed class UserService(IUserRepository users) : IUserService
         return list.Select(ToItem).ToList();
     }
 
-    public async Task<UserItem> CreateAsync(NewUserRequest req)
+    public async Task<UserItem> CreateAsync(NewUserRequest req, Actor actor)
     {
         var email = (req.Email ?? "").Trim().ToLower();
         if (string.IsNullOrWhiteSpace(req.Name)) throw ApiException.BadRequest("Name is required");
@@ -40,13 +40,23 @@ public sealed class UserService(IUserRepository users) : IUserService
         };
         await users.AddAsync(user);
         await users.SaveAsync();
+
+        // The audit row: which admin created which account.
+        await activity.AddAsync(actor, "Created", "User", user.Id, groupId: null,
+            $"Created user {user.Name} ({user.Email}) as {user.Role}");
+        await activity.SaveAsync();
         return ToItem(user);
     }
 
-    public async Task<UserItem> UpdateAsync(int id, UpdateUserRequest req)
+    public async Task<UserItem> UpdateAsync(int id, UpdateUserRequest req, Actor actor)
     {
         var user = await users.FindByIdAsync(id)
             ?? throw ApiException.NotFound("User not found");
+
+        // The audit diff — old values before anything mutates.
+        var oldRole = user.Role;
+        var oldActive = user.IsActive;
+        var oldName = user.Name;
 
         if (req.Name is not null) user.Name = req.Name.Trim();
         if (req.Role is not null)
@@ -59,6 +69,19 @@ public sealed class UserService(IUserRepository users) : IUserService
         if (!string.IsNullOrWhiteSpace(req.Password))
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password);
         await users.SaveAsync();
+
+        var changes = new List<string>();
+        if (user.Role != oldRole) changes.Add($"role {oldRole} → {user.Role}");
+        if (user.IsActive != oldActive)
+            changes.Add(user.IsActive ? "re-activated" : "deactivated");
+        if (user.Name != oldName) changes.Add($"name {oldName} → {user.Name}");
+        if (!string.IsNullOrWhiteSpace(req.Password)) changes.Add("password reset");
+
+        // The audit row: which admin changed which account (never the
+        // password itself, obviously).
+        await activity.AddAsync(actor, "Updated", "User", id, groupId: null,
+            $"Updated user {user.Name} — {string.Join("; ", changes)}");
+        await activity.SaveAsync();
         return ToItem(user);
     }
 

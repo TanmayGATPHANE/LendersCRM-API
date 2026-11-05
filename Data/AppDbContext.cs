@@ -34,6 +34,7 @@ public class AmsDbContext : DbContext
     public DbSet<Entry> Entries => Set<Entry>();
     public DbSet<PartialReturn> PartialReturns => Set<PartialReturn>();
     public DbSet<CashLedger> CashLedger => Set<CashLedger>();
+    public DbSet<ActivityLog> ActivityLog => Set<ActivityLog>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -100,6 +101,19 @@ public class AmsDbContext : DbContext
             e.HasIndex(x => x.LedgerDate);
             e.HasIndex(x => x.Source);
             e.HasIndex(x => x.ReferenceId);
+        });
+
+        mb.Entity<ActivityLog>(e =>
+        {
+            e.Property(x => x.UserName).HasMaxLength(100);
+            e.Property(x => x.Action).HasMaxLength(20);
+            e.Property(x => x.Entity).HasMaxLength(20);
+            e.Property(x => x.Details).HasMaxLength(500);
+            // The Activity page reads newest-first; a group's history reads
+            // by GroupId; a user's trail by UserId.
+            e.HasIndex(x => x.AtUtc);
+            e.HasIndex(x => x.GroupId);
+            e.HasIndex(x => x.UserId);
         });
     }
 }

@@ -29,14 +29,14 @@ public class GroupsController : ControllerBase
     [HttpPost("{id}/payments")]
     [Authorize(Policy = "Writer")]
     public async Task<IActionResult> AddPayment(int id, NewPaymentRequest req) => Ok(
-        await _payments.AddToGroupAsync(id, req, CurrentUser.TryId(User)));
+        await _payments.AddToGroupAsync(id, req, CurrentUser.Actor(User)));
 
     /// Move the whole group — lends + payments — to another customer.
     [HttpPut("{id}/customer")]
     [Authorize(Policy = "Writer")]
     public async Task<IActionResult> MoveCustomer(int id, MoveGroupRequest req)
     {
-        await _groups.MoveCustomerAsync(id, req.CustomerId);
+        await _groups.MoveCustomerAsync(id, req.CustomerId, CurrentUser.Actor(User));
         return Ok(new { groupId = id, customerId = req.CustomerId });
     }
 
@@ -45,5 +45,5 @@ public class GroupsController : ControllerBase
     [HttpPost("{id}/release")]
     [Authorize(Policy = "Writer")]
     public async Task<IActionResult> Release(int id, ReleaseRequest req) =>
-        Ok(await _groups.ReleaseAsync(id, req));
+        Ok(await _groups.ReleaseAsync(id, req, CurrentUser.Actor(User)));
 }

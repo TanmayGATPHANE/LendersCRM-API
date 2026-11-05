@@ -96,6 +96,24 @@ CREATE TABLE CashLedger (
     CONSTRAINT PK_CashLedger PRIMARY KEY (Id)
 );
 
+-- The audit trail (§10): every create/edit/release/delete a signed-in user
+-- performs — who did it (id + name snapshot), what changed, readable detail.
+CREATE TABLE ActivityLog (
+    Id          INT IDENTITY(1,1) NOT NULL,
+    AtUtc       DATETIME2         NOT NULL,       -- when (UTC; UI shows local)
+    UserId      INT               NULL,           -- the acting user
+    UserName    NVARCHAR(100)     NOT NULL,       -- name snapshot at write time
+    Action      NVARCHAR(20)      NOT NULL,       -- Created | Updated | Released | Deleted
+    Entity      NVARCHAR(20)      NOT NULL,       -- Entry | Customer | Payment | CashLedger | User | Group
+    EntityId    INT               NOT NULL,
+    GroupId     INT               NULL,           -- per-collateral history lookup
+    Details     NVARCHAR(500)     NOT NULL,       -- "Edited lend: amount 20,000 → 25,000"
+    CONSTRAINT PK_ActivityLog PRIMARY KEY (Id)
+);
+CREATE INDEX IX_ActivityLog_AtUtc   ON ActivityLog (AtUtc);
+CREATE INDEX IX_ActivityLog_GroupId ON ActivityLog (GroupId);
+CREATE INDEX IX_ActivityLog_UserId  ON ActivityLog (UserId);
+
 -- Seed the first admin (password: admin123 — change after first login).
 -- The hash below is the same static hash the migrations pin.
 INSERT INTO Users (Name, Email, PasswordHash, Role, IsActive, CreatedAt)

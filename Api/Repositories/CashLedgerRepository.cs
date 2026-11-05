@@ -6,7 +6,12 @@ namespace AMS.Api.Repositories;
 
 public interface ICashLedgerRepository
 {
-    Task<List<CashLedger>> ListAsync();
+    /// The ledger rows (optionally clipped to an inclusive LedgerDate
+    /// window — nulls mean unbounded), oldest first; the page re-sorts.
+    Task<List<CashLedger>> ListAsync(DateOnly? from = null, DateOnly? to = null);
+    /// Whole-book cash: SUM(Amount) over every row, the Total Cash
+    /// Available the dashboard tile reads — window-independent.
+    Task<decimal> TotalAsync();
     Task<CashLedger?> FindByIdAsync(int id, bool tracked = true);
     /// The ledger row booked from a books record (Source + ReferenceId link)
     /// — used for the edit-syncs (payments, lends).
@@ -21,10 +26,16 @@ public interface ICashLedgerRepository
 /// just AddAsync + SaveAsync and the rows land in the SAME transaction.
 public sealed class CashLedgerRepository(AmsDbContext db) : ICashLedgerRepository
 {
-    public Task<List<CashLedger>> ListAsync() =>
-        db.CashLedger.AsNoTracking()
-            .OrderBy(x => x.LedgerDate).ThenBy(x => x.Id)
-            .ToListAsync();
+    public async Task<List<CashLedger>> ListAsync(DateOnly? from, DateOnly? to)
+    {
+        var q = db.CashLedger.AsNoTracking().AsQueryable();
+        if (from is { } f) q = q.Where(x => x.LedgerDate >= f);
+        if (to is { } t) q = q.Where(x => x.LedgerDate <= t);
+        return await q.OrderBy(x => x.LedgerDate).ThenBy(x => x.Id).ToListAsync();
+    }
+
+    public Task<decimal> TotalAsync() =>
+        db.CashLedger.SumAsync(x => x.Amount);
 
     public Task<CashLedger?> FindByIdAsync(int id, bool tracked = true) =>
         tracked

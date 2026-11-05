@@ -20,5 +20,5 @@ public class PaymentsController : ControllerBase
     [HttpPut("/api/payments/{id}")]
     [Authorize(Policy = "Writer")]
     public async Task<IActionResult> Update(int id, UpdatePaymentRequest req) =>
-        Ok(await _payments.UpdateAsync(id, req));
+        Ok(await _payments.UpdateAsync(id, req, CurrentUser.Actor(User)));
 }

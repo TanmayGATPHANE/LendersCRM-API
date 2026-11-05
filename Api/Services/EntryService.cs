@@ -1,4 +1,4 @@
-﻿using AMS.Api.Repositories;
+using AMS.Api.Repositories;
 using AMS.Data.Entities;
 
 namespace AMS.Api.Services;
@@ -6,14 +6,15 @@ namespace AMS.Api.Services;
 public interface IEntryService
 {
     Task<List<EntryItem>> ListAsync(string? status, string? search);
-    Task<(int Id, int GroupId)> AddAsync(NewEntryRequest req, int? userId);
-    Task<(int Id, int GroupId)> UpdateAsync(int id, UpdateEntryRequest req);
+    Task<(int Id, int GroupId)> AddAsync(NewEntryRequest req, Actor actor);
+    Task<(int Id, int GroupId)> UpdateAsync(int id, UpdateEntryRequest req, Actor actor);
 }
 
-/** Lend entries (plan Â§4.1, Â§4.3, Â§4.5): list with computed interest,
+/** Lend entries (plan ±§4.1, ±§4.3, ±§4.5): list with computed interest,
     add (new collateral or sub-lend), edit while active. */
 public sealed class EntryService(
-    IEntryRepository entries, IPaymentRepository payments, ICashLedgerRepository cash) : IEntryService
+    IEntryRepository entries, IPaymentRepository payments, ICashLedgerRepository cash,
+    ICustomerRepository customers, IActivityRepository activity) : IEntryService
 {
     public async Task<List<EntryItem>> ListAsync(string? status, string? search)
     {
@@ -21,13 +22,14 @@ public sealed class EntryService(
         return await MapWithFifoPaid(list);
     }
 
-    public async Task<(int Id, int GroupId)> AddAsync(NewEntryRequest req, int? userId)
+    public async Task<(int Id, int GroupId)> AddAsync(NewEntryRequest req, Actor actor)
     {
         if (req.Amount <= 0) throw ApiException.BadRequest("Amount must be greater than 0");
         var item = (req.Item ?? "").Trim();
         if (item.Length == 0) throw ApiException.BadRequest("Item description is required");
         if (!await entries.CustomerExistsAsync(req.CustomerId))
             throw ApiException.BadRequest("Customer not found");
+        var owner = await customers.FindByIdAsync(req.CustomerId);
 
         var entry = new Entry
         {
@@ -37,7 +39,7 @@ public sealed class EntryService(
             AmountLend = req.Amount,
             InterestRate = req.Rate,
             Notes = req.Notes ?? "",
-            CreatedByUserId = userId,
+            CreatedByUserId = actor.Id,
         };
 
         if (req.GroupId is int gid)
@@ -69,20 +71,37 @@ public sealed class EntryService(
             ReferenceId = entry.Id,
         });
         await cash.SaveAsync();
+
+        // The audit row: who added this lend (riders on the ledger save).
+        await activity.AddAsync(actor, "Created", "Entry", entry.Id, entry.GroupId,
+            $"{(req.GroupId is int ? "Added sub-lend" : "Added lend")} {ActivityStages.Money(entry.AmountLend)} — " +
+            $"{entry.ItemDescription} for {owner?.Name ?? $"customer #{entry.CustomerId}"}");
+        await activity.SaveAsync();
         return (entry.Id, entry.GroupId);
     }
 
-    public async Task<(int Id, int GroupId)> UpdateAsync(int id, UpdateEntryRequest req)
+    public async Task<(int Id, int GroupId)> UpdateAsync(int id, UpdateEntryRequest req, Actor actor)
     {
         var entry = await entries.FindByIdAsync(id, tracked: true)
             ?? throw ApiException.NotFound("Entry not found");
         if (entry.Status != "Active") throw ApiException.Conflict("Only active entries can be edited");
         if (req.Amount is decimal a && a <= 0) throw ApiException.BadRequest("Amount must be greater than 0");
 
+        // The audit diff — capture the old values before anything mutates.
+        var oldCustomerId = entry.CustomerId;
+        var oldCustomerName = (await customers.FindByIdAsync(entry.CustomerId))?.Name;
+        var oldItem = entry.ItemDescription;
+        var oldDate = entry.EntryDate;
+        var oldAmount = entry.AmountLend;
+        var oldRate = entry.InterestRate;
+        var oldNotes = entry.Notes;
+
+        string? newCustomerName = null;
         if (req.CustomerId is int cid && cid != entry.CustomerId)
         {
             if (!await entries.CustomerExistsAsync(cid))
                 throw ApiException.BadRequest("Customer not found");
+            newCustomerName = (await customers.FindByIdAsync(cid))?.Name;
             entry.CustomerId = cid;
         }
         if (req.Item is not null && req.Item.Trim().Length > 0) entry.ItemDescription = req.Item.Trim();
@@ -100,6 +119,22 @@ public sealed class EntryService(
         if (req.Notes is not null) entry.Notes = req.Notes;
         entry.ModifiedAt = DateTime.UtcNow;
         await entries.SaveAsync();
+
+        // Human-readable diff of what actually changed (field: old → new).
+        var changes = new List<string>();
+        if (newCustomerName is not null)
+            changes.Add($"customer {oldCustomerName ?? $"#{oldCustomerId}"} → {newCustomerName}");
+        if (entry.ItemDescription != oldItem)
+            changes.Add($"item {oldItem} → {entry.ItemDescription}");
+        if (entry.EntryDate != oldDate)
+            changes.Add($"date {oldDate:dd/MM/yyyy} → {entry.EntryDate:dd/MM/yyyy}");
+        if (entry.AmountLend != oldAmount)
+            changes.Add($"amount {ActivityStages.Money(oldAmount)} → {ActivityStages.Money(entry.AmountLend)}");
+        if (entry.InterestRate != oldRate)
+            changes.Add($"rate {RateText(oldRate)} → {RateText(entry.InterestRate)}");
+        if (entry.Notes != oldNotes)
+            changes.Add("notes updated");
+
         // A lend edit keeps its 'Lend' ledger row in step (date + amount).
         var ledgerRow = await cash.FindForSourceAsync("Lend", id, tracked: true);
         if (ledgerRow is not null)
@@ -108,12 +143,19 @@ public sealed class EntryService(
             ledgerRow.Amount = -entry.AmountLend;
             await cash.SaveAsync();
         }
+
+        // The audit row: who edited this lend, and what moved.
+        await activity.AddAsync(actor, "Updated", "Entry", entry.Id, entry.GroupId,
+            $"Edited lend — {string.Join("; ", changes)}");
+        await activity.SaveAsync();
         return (entry.Id, entry.GroupId);
     }
 
+    private static string RateText(decimal? r) => r is null ? "interest-free" : $"{r}%";
+
     internal async Task<List<EntryItem>> MapWithFifoPaid(List<Entry> list)
     {
-        // FIFO allocation of each group's partial returns (Â§4.6) â€” the
+        // FIFO allocation of each group's partial returns (±§4.6) — the
         // basis for both `paid` and live interest accrual.
         var allPayments = await payments.ListAsync();
         var paidMap = new Dictionary<int, decimal>();
