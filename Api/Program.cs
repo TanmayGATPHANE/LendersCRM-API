@@ -46,9 +46,15 @@ builder.Services.AddControllers();
 // default; deployed origins ride in via config so the same build serves
 // anywhere — Cors:AllowedOrigins (config array) or, on the host, the
 // CORS__AllowedOrigins env var (comma-separated, e.g. the Vercel URL).
+// Each entry is trimmed — a paste's stray space must not silently
+// disable an origin — and empties are dropped.
 var corsOrigins = new List<string> { "http://localhost:5173", "http://localhost:4173" };
-corsOrigins.AddRange(builder.Configuration
-    .GetSection("Cors:AllowedOrigins").Get<string[]>() ?? []);
+foreach (var raw in builder.Configuration
+    .GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
+{
+    var origin = raw.Trim();
+    if (origin.Length > 0) corsOrigins.Add(origin);
+}
 builder.Services.AddCors(o => o.AddPolicy("frontend", p => p
     .WithOrigins(corsOrigins.ToArray())
     .AllowAnyHeader().AllowAnyMethod()));
@@ -90,6 +96,10 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+// One log line that settles every CORS mystery: the origins the policy
+// ACTUALLY loaded (visible in the host's logs, e.g. Render Events).
+app.Logger.LogInformation("CORS allowed origins: {Origins}", string.Join(", ", corsOrigins));
 
 if (app.Environment.IsDevelopment())
 {
