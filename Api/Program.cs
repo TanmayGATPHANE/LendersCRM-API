@@ -46,11 +46,21 @@ builder.Services.AddControllers();
 // default; deployed origins ride in via config so the same build serves
 // anywhere — Cors:AllowedOrigins (config array) or, on the host, the
 // CORS__AllowedOrigins env var (comma-separated, e.g. the Vercel URL).
-// Each entry is trimmed — a paste's stray space must not silently
-// disable an origin — and empties are dropped.
+// The binder will not comma-split a SCALAR value into string[], so the
+// env var (always one string) has to be split here: read any child
+// entries (the config-array form) AND the section's own scalar value,
+// trim each, drop blanks — a paste's stray space must not silently
+// disable an origin.
+var corsSection = builder.Configuration.GetSection("Cors:AllowedOrigins");
+// All origins fold into one list: the child entries (the config-array
+// form) plus the section's own scalar — which is how the env var arrives:
+// ONE string, several origins packed with commas. The binder does not
+// comma-split scalars into string[], so the split happens here.
+var rawOrigins = corsSection.GetChildren().Select(c => c.Value)
+    .Concat([corsSection.Value])
+    .SelectMany(v => v?.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries) ?? []);
 var corsOrigins = new List<string> { "http://localhost:5173", "http://localhost:4173" };
-foreach (var raw in builder.Configuration
-    .GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
+foreach (var raw in rawOrigins)
 {
     var origin = raw.Trim();
     if (origin.Length > 0) corsOrigins.Add(origin);
