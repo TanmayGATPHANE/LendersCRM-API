@@ -13,8 +13,13 @@ var builder = WebApplication.CreateBuilder(args);
 // ── Data access ───────────────────────────────────────────────────────────
 // EF Core + a SQL Server LocalDB file in development. Swap the connection
 // string to the SQLEXPRESS (or any full) instance — nothing else moves.
+// CommandTimeout: the shared SQL budget for every query — the hosted
+// server is slower than the local one, so this is generous (120s, config
+// Database:CommandTimeout to change; 0 = no limit — a stuck request
+// hangs forever instead of failing fast, the trade).
 builder.Services.AddDbContext<AmsDbContext>(o =>
-    o.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
+    o.UseSqlServer(builder.Configuration.GetConnectionString("Default"),
+        sql => sql.CommandTimeout(builder.Configuration.GetValue<int?>("Database:CommandTimeout") ?? 220)));
 
 // ── Layered architecture: controller → service → repository → EF Core ────
 // Controllers (Api/Controllers) route HTTP and authorize.
