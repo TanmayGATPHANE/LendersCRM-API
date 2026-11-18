@@ -8,6 +8,21 @@ namespace AMS.Api;
  * service layer so every error reaches the UI as `{ message }`.
  */
 
+// ---- outsourcing (§4.8) — a collateral sitting with an outside party ----
+/// One OPEN outsourced round: the collateral handed to `outsourcedTo` on
+/// `date`; while it is out the group stays out of the dashboard/reports/
+/// customers views and this list is the ONLY place it shows. Returned
+/// rounds (the group is back) never appear — they live in the audit trail.
+public sealed record OutsourcedRow(
+    int GroupId, string Customer, string Item, decimal AmountLent,
+    string OutsourcedTo, DateOnly Date, string? Notes);
+
+/// POST /api/groups/{id}/outsource — hand a collateral to an outside party.
+public record NewOutsourceRequest(DateOnly Date, string To, string? Notes);
+/// POST /api/groups/{id}/outsource/return — the item came back; the group
+/// reappears on the dashboard/reports/customers views.
+public record OutsourceReturnRequest(DateOnly DateReturned);
+
 // ---- auth ----
 public record LoginRequest(string Email, string Password);
 

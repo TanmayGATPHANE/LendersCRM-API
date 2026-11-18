@@ -35,6 +35,7 @@ public class AmsDbContext : DbContext
     public DbSet<PartialReturn> PartialReturns => Set<PartialReturn>();
     public DbSet<CashLedger> CashLedger => Set<CashLedger>();
     public DbSet<ActivityLog> ActivityLog => Set<ActivityLog>();
+    public DbSet<OutsourcedItem> OutsourcedItems => Set<OutsourcedItem>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -114,6 +115,16 @@ public class AmsDbContext : DbContext
             e.HasIndex(x => x.AtUtc);
             e.HasIndex(x => x.GroupId);
             e.HasIndex(x => x.UserId);
+        });
+
+        mb.Entity<OutsourcedItem>(e =>
+        {
+            e.Property(x => x.OutsourcedTo).HasMaxLength(150);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            // The Outsourced page lists the open rounds by date; a group's
+            // in-and-out history reads by GroupId.
+            e.HasIndex(x => x.GroupId);
+            e.HasIndex(x => x.OutsourceDate);
         });
     }
 }

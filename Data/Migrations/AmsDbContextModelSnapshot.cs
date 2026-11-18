@@ -203,6 +203,9 @@ namespace AMS.Data.Migrations
                         .HasPrecision(5, 2)
                         .HasColumnType("decimal(5,2)");
 
+                    b.Property<bool>("IsOutsourced")
+                        .HasColumnType("bit");
+
                     b.Property<string>("ItemDescription")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -239,6 +242,47 @@ namespace AMS.Data.Migrations
                     b.HasIndex("Status", "EntryDate");
 
                     b.ToTable("Entries");
+                });
+
+            modelBuilder.Entity("AMS.Data.Entities.OutsourcedItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("GroupId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateOnly>("OutsourceDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("OutsourcedTo")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<DateOnly?>("ReturnedDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId");
+
+                    b.HasIndex("OutsourceDate");
+
+                    b.ToTable("OutsourcedItems");
                 });
 
             modelBuilder.Entity("AMS.Data.Entities.PartialReturn", b =>

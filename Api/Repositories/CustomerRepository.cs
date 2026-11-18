@@ -35,7 +35,7 @@ public sealed class CustomerRepository(AmsDbContext db) : ICustomerRepository
     public async Task<Dictionary<int, (int ActiveCount, decimal Outstanding)>> ActiveStatsAsync()
     {
         var lends = await db.Entries.AsNoTracking()
-            .Where(e => e.Status == "Active")
+            .Where(e => e.Status == "Active" && !e.IsOutsourced) // outsourced collaterals leave the views (§4.8)
             .Select(e => new { e.CustomerId, e.GroupId, e.AmountLend })
             .ToListAsync();
         var paidByGroup = await db.PartialReturns.AsNoTracking()

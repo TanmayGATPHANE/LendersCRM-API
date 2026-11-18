@@ -14,6 +14,9 @@ public interface IEntryRepository
     /// notes contain the text; a numeric query also matches lend amounts.
     Task<List<Entry>> SearchAsync(string search, int take);
     Task<List<Entry>> ListForGroupAsync(int groupId, bool tracked = false);
+    /// Several groups at once (the Outsourced page's rows) — NOT filtered
+    /// by IsOutsourced: group operations need every lend of the group.
+    Task<List<Entry>> ListForGroupsAsync(List<int> groupIds);
     Task<Entry?> FindByIdAsync(int id, bool tracked = true);
     Task<bool> CustomerExistsAsync(int customerId);
     Task AddAsync(Entry entry);
@@ -27,7 +30,7 @@ public sealed class EntryRepository(AmsDbContext db) : IEntryRepository
 {
     public Task<List<Entry>> ListAsync(string? status, string? search)
     {
-        IQueryable<Entry> q = db.Entries.AsNoTracking().Include(e => e.Customer);
+        IQueryable<Entry> q = ListableView();
         if (!string.IsNullOrWhiteSpace(status))
             q = q.Where(e => e.Status == status);
         if (!string.IsNullOrWhiteSpace(search))
@@ -39,17 +42,24 @@ public sealed class EntryRepository(AmsDbContext db) : IEntryRepository
         return q.OrderBy(e => e.EntryDate).ThenBy(e => e.Id).ToListAsync();
     }
 
+    /// The views' base query: every lend EXCEPT outsourced ones (§4.8) —
+    /// a collateral sitting with an outside party shows only on the
+    /// Outsourced page, never on the dashboard, reports or customer views.
+    IQueryable<Entry> ListableView() =>
+        db.Entries.AsNoTracking().Include(e => e.Customer).Where(e => !e.IsOutsourced);
+
     public Task<List<Entry>> SearchAsync(string search, int take)
     {
         var s = search.Trim().ToLower();
         // A numeric query also finds lends by their amount ("20000").
+        // Outsourced collaterals stay out of the search too (§4.8).
         IQueryable<Entry> q = s.Length > 0 && decimal.TryParse(s, out var val)
-            ? db.Entries.AsNoTracking().Include(e => e.Customer).Where(e =>
+            ? ListableView().Where(e =>
                   e.AmountLend == val
                   || e.ItemDescription.ToLower().Contains(s)
                   || e.Customer!.Name.ToLower().Contains(s)
                   || e.Notes.ToLower().Contains(s))
-            : db.Entries.AsNoTracking().Include(e => e.Customer).Where(e =>
+            : ListableView().Where(e =>
                   e.ItemDescription.ToLower().Contains(s)
                   || e.Customer!.Name.ToLower().Contains(s)
                   || e.Notes.ToLower().Contains(s));
@@ -65,6 +75,13 @@ public sealed class EntryRepository(AmsDbContext db) : IEntryRepository
 
     public Task<List<Entry>> ListForGroupAsync(int groupId, bool tracked = false) =>
         GroupQuery(groupId, tracked).OrderBy(e => e.EntryDate).ThenBy(e => e.Id).ToListAsync();
+
+    /// Several groups at once (the Outsourced page's rows) — NOT filtered
+    /// by IsOutsourced: group operations need every lend of the group.
+    public Task<List<Entry>> ListForGroupsAsync(List<int> groupIds) =>
+        db.Entries.AsNoTracking().Include(e => e.Customer)
+            .Where(e => groupIds.Contains(e.GroupId))
+            .OrderBy(e => e.EntryDate).ThenBy(e => e.Id).ToListAsync();
 
     public Task<Entry?> FindByIdAsync(int id, bool tracked = true) =>
         tracked

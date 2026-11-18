@@ -20,6 +20,10 @@ public class Entry
     public DateOnly? ExpectedReturn { get; set; }
     /// Active | Released.
     public string Status { get; set; } = "Active";
+    /// §4.8 — the collateral sits with an outside party; it leaves the
+    /// dashboard/reports/customers views while true and shows only on the
+    /// Outsourced page. Group-wide: every lend of the group carries it.
+    public bool IsOutsourced { get; set; }
     /// Principal still out on this lend (+ its frozen interest) at release.
     public decimal? AmountReturned { get; set; }
     /// Interest frozen at the release date (§4.2).
