@@ -27,7 +27,6 @@ public sealed class ImportRepository(AmsDbContext db, IActivityRepository activi
 
     public async Task<ImportResult> CommitAsync(ImportPreview data, decimal rate, Actor actor)
     {
-        await using var tx = await db.Database.BeginTransactionAsync();
         var result = new ImportResult();
 
         foreach (var g in data.Groups)
@@ -53,6 +52,16 @@ public sealed class ImportRepository(AmsDbContext db, IActivityRepository activi
                         result.ReturnsSkipped++;
                 continue;
             }
+
+            // ONE tiny transaction PER COLLATERAL, not one for the whole
+            // workbook: a book-wide transaction holds rows locked for its
+            // entire run, and any dashboard read firing at the same time
+            // (the SPA refreshes entries/insights/customers constantly)
+            // deadlocks against it — SQL kills both, the counter sees a
+            // wall of 500s. Group-sized commits lock for milliseconds.
+            // A mid-import crash is a no-op for the survivors: the next
+            // re-import skips the stamped groups (§4.7) and resumes here.
+            await using var tx = await db.Database.BeginTransactionAsync();
 
             // Find-or-create the borrower by exact name (the same rule the
             // Add Entry dialog uses) — names repeat across collaterals but
@@ -131,9 +140,9 @@ public sealed class ImportRepository(AmsDbContext db, IActivityRepository activi
                 result.ReturnsCreated++;
             }
             await db.SaveChangesAsync();
+            await tx.CommitAsync(); // the group's locks release here
         }
 
-        await tx.CommitAsync();
         return result;
     }
 
