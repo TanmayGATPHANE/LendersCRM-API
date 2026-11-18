@@ -5,6 +5,7 @@ using AMS.Api.Services;
 using AMS.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -110,6 +111,18 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+// Optional at start-up: apply EF migrations to the database (e.g. the
+// hosted SQL Server) BEFORE serving — MigrateOnStartup: true in config.
+// A deploy that ships new migrations then fixes the database in the same
+// boot; off by default (local development migrates deliberately).
+if (builder.Configuration.GetValue<bool>("MigrateOnStartup"))
+{
+    using var migrateScope = app.Services.CreateScope();
+    var db = migrateScope.ServiceProvider.GetRequiredService<AmsDbContext>();
+    db.Database.Migrate();
+    app.Logger.LogInformation("EF migrations applied at startup (MigrateOnStartup).");
+}
 
 // One log line that settles every CORS mystery: the origins the policy
 // ACTUALLY loaded (visible in the host's logs, e.g. Render Events).
