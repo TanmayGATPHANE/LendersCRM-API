@@ -129,6 +129,37 @@ public sealed record CustomerReportRow(
     decimal TotalLent, decimal ReturnedPrincipal, decimal InterestCollected,
     decimal ActiveOutstanding, decimal InterestAccruing);
 
+// ---- Excel import (plan §4.7) — one lending book sheet per file ----
+/// One money row of a parsed sheet: a lend (Amount > 0) or a partial
+/// return (Amount < 0 in the sheet, sent positive here). Row = the sheet
+/// row it came from, for the preview table and the Notes stamp.
+public sealed record ImportPreviewRow(DateOnly Date, decimal Amount, int Row, string? Notes = null);
+/// One collateral parsed from a sheet: merged Name+Item cells make the
+/// head row and every continuation row share one collateral (sub-lends).
+/// Unmerged rows are their own collateral, even for the same name.
+public sealed record ImportPreviewGroup(
+    string Name, string Item, int Row,
+    List<ImportPreviewRow> Lends, List<ImportPreviewRow> Returns);
+/// The whole parsed workbook: what the preview renders and the commit
+/// executes — the two endpoints parse the same bytes the same way.
+public sealed record ImportPreview(
+    string FileName, List<string> Sheets, string SheetUsed,
+    List<ImportPreviewGroup> Groups, List<string> Warnings);
+
+/// What a committed import actually wrote (skipped rows were already
+/// in the books — re-importing the same file is a no-op, see §4.7).
+/// Mutable: the repository accumulates while it walks the parsed groups.
+public sealed class ImportResult
+{
+    public int CustomersCreated { get; set; }
+    public int CustomersFound { get; set; }
+    public int GroupsCreated { get; set; }
+    public int LendsCreated { get; set; }
+    public int ReturnsCreated { get; set; }
+    public int GroupsSkipped { get; set; }
+    public int ReturnsSkipped { get; set; }
+}
+
 /// Per-released-collateral outcome: how long the money was out, what came
 /// back, and the counter's actual cash figure (§4.2).
 public sealed record ReleaseReportRow(

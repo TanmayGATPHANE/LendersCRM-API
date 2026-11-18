@@ -9,30 +9,23 @@ public interface IInsightsService
 
 /** The headline numbers above the dashboard — backend-computed on EVERY
     call, so any add/edit/payment/release shows fresh values as soon as
-    the page refetches (plan §3.1, §6). `tab` slices the books by status:
+    the page refetches (plan §3.1, §6). The tab slices the books:
 
-      tab = all/null  (default) — the global books:
-        totalAmanat     — Σ active lends − the partials received against
-                          those still-active collaterals.
-        interestEarned  — Σ InterestCollected from releases dated within
-                          the Indian FY (1 Apr – 31 Mar).
-        cashAvailable   — SUM(CashLedger.Amount): the stored cash table
-                          (§3.5) — lends out, partial returns, the two
-                          entries each release posts, and manual ±.
-
-      tab = active    — the working set:
-        totalAmanat     — same money-in-customers'-hands figure.
-        interestEarned  — interest ACCRUED LIVE on active lends (basis:
-                          amount − FIFO-allocated partials), which freezes
-                          at release.
-        cashAvailable   — cash the drawer GAVE OUT on active collaterals
-                          (lends − partials received) = −Total Amanat:
-                          every rupee lent out is cash not in hand.
-
-      tab = released  — the closed collaterals:
-        totalAmanat     — principal recovered (amountReturned − interest).
-        interestEarned  — Σ interest frozen on the released lends.
-        cashAvailable   — the two together: what release days brought in. */
+      Total Amanat        — the SUM OF LEND AMOUNTS on the tab's rows:
+                            all = every lend on the books, active = the
+                            active collaterals' lends, released = the
+                            released ones. No deductions.
+      Interest (per tab)  — all: Σ InterestCollected from releases dated
+                            within the Indian FY (1 Apr – 31 Mar);
+                            active: interest ACCRUED LIVE on active lends
+                            (basis: amount − FIFO-allocated partials);
+                            released: Σ interest frozen on the released
+                            lends.
+      Total Cash Available— SUM(CashLedger.Amount) — the stored cash
+                            table (§3.5), NOTHING else. One figure on
+                            every tab: lends book −, partial returns and
+                            the two release legs book +, manual ± books
+                            itself. */
 public sealed class InsightsService(
     IEntryRepository entries, IPaymentRepository payments, ICashLedgerRepository cash) : IInsightsService
 {
@@ -47,64 +40,45 @@ public sealed class InsightsService(
 
         var allEntries = await entries.ListAsync(status: null, search: null);
         var allPayments = await payments.ListAsync();
-
-        var activeEntries = allEntries.Where(e => e.Status == "Active").ToList();
-        var activeGroupIds = activeEntries.Select(e => e.GroupId).ToHashSet();
-        if (slice == "active")
-        {
-            var receivedOnActive = allPayments
-                .Where(p => activeGroupIds.Contains(p.GroupId)).Sum(p => p.Amount);
-            // Accrued live per lend on its FIFO share of the group's
-            // partials — the exact figure the release will freeze.
-            var groupPaid = activeEntries.GroupBy(e => e.GroupId)
-                .ToDictionary(
-                    g => g.Key,
-                    g => Interest.AllocatePaid(g, allPayments
-                        .Where(p => p.GroupId == g.Key).Sum(p => p.Amount)));
-            var interestAccrued = activeEntries.Sum(e =>
-                Interest.Accrued(
-                    e.AmountLend - Paid(groupPaid, e),
-                    e.InterestRate, e.EntryDate, DateOnly.FromDateTime(DateTime.Today)));
-
-            return new InsightsResult(
-                TotalAmanat: Math.Max(0m, activeEntries.Sum(e => e.AmountLend) - receivedOnActive),
-                InterestEarned: interestAccrued,
-                CashAvailable: receivedOnActive - activeEntries.Sum(e => e.AmountLend));
-        }
-
-        if (slice == "released")
-        {
-            var released = allEntries.Where(e => e.Status == "Released").ToList();
-            var recovered = released
-                .Sum(e => (e.AmountReturned ?? 0m) - (e.InterestCollected ?? 0m));
-            var collected = released.Sum(e => e.InterestCollected ?? 0m);
-
-            return new InsightsResult(
-                TotalAmanat: Math.Max(0m, recovered),
-                InterestEarned: collected,
-                CashAvailable: Math.Max(0m, recovered) + Math.Max(0m, collected));
-        }
-
-        // "all" (and anything unrecognised) — the global books.
-        // Cash now reads straight from the stored CashLedger table (§3.5):
-        // partial returns, the release-principal/interest rows and the
-        // manual ± all sit there; SUM(Amount) IS Total Cash Available.
         var ledger = await cash.ListAsync();
-        var activePrincipal = allEntries
-            .Where(e => e.Status == "Active").Sum(e => e.AmountLend);
-        var interestEarned = allEntries
-            .Where(e => e.Status == "Released"
-                     && e.ReleasedDate is { } d && d >= fyStart && d <= fyEnd)
-            .Sum(e => e.InterestCollected ?? 0m);
+
+        // The tab's rows — Total Amanat is the plain Σ AmountLend over
+        // them (§3.1); the interest tile is the only tab-specific slice.
+        var tabEntries = slice == "released"
+            ? allEntries.Where(e => e.Status == "Released").ToList()
+            : slice == "active"
+                ? allEntries.Where(e => e.Status == "Active").ToList()
+                : allEntries;
+        var interestEarned = slice == "active"
+            ? AccruedLive(allEntries, allPayments)
+            : slice == "released"
+                ? tabEntries.Sum(e => e.InterestCollected ?? 0m)
+                : allEntries
+                    .Where(e => e.Status == "Released"
+                             && e.ReleasedDate is { } d && d >= fyStart && d <= fyEnd)
+                    .Sum(e => e.InterestCollected ?? 0m);
 
         return new InsightsResult(
-            TotalAmanat: Math.Max(0m, activePrincipal - allPayments
-                .Where(p => activeGroupIds.Contains(p.GroupId)).Sum(p => p.Amount)),
+            TotalAmanat: tabEntries.Sum(e => e.AmountLend),
             InterestEarned: interestEarned,
+            // The stored cash table's own SUM — nothing else, one figure
+            // on every tab (the page's tabs change the other two tiles).
             CashAvailable: ledger.Sum(x => x.Amount));
     }
 
-    /// FIFO share of one entry's group partials, from the per-group maps.
-    private static decimal Paid(Dictionary<int, Dictionary<int, decimal>> groupPaid, Data.Entities.Entry e) =>
-        groupPaid.TryGetValue(e.GroupId, out var map) && map.TryGetValue(e.Id, out var v) ? v : 0m;
+    /** Interest accruing live on active lends — FIFO share of each
+        group's partials first, then the shared formula (§4.4). */
+    private static decimal AccruedLive(List<Data.Entities.Entry> activeEntries, List<Data.Entities.PartialReturn> allPayments)
+    {
+        var groupPaid = activeEntries.GroupBy(e => e.GroupId)
+            .ToDictionary(
+                g => g.Key,
+                g => Interest.AllocatePaid(g, allPayments
+                    .Where(p => p.GroupId == g.Key).Sum(p => p.Amount)));
+        return activeEntries.Sum(e =>
+            Interest.Accrued(
+                e.AmountLend - (groupPaid.TryGetValue(e.GroupId, out var map) &&
+                                map.TryGetValue(e.Id, out var v) ? v : 0m),
+                e.InterestRate, e.EntryDate, DateOnly.FromDateTime(DateTime.Today)));
+    }
 }

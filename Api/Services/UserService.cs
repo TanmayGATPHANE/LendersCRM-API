@@ -58,6 +58,11 @@ public sealed class UserService(IUserRepository users, IActivityRepository activ
         var oldActive = user.IsActive;
         var oldName = user.Name;
 
+        // Changing this account's EFFECTIVE access — used by the last-admin
+        // guard below (a role change or a deactivation both count).
+        var roleAfter = req.Role ?? user.Role;
+        var activeAfter = req.IsActive.HasValue ? req.IsActive.Value : user.IsActive;
+
         if (req.Name is not null) user.Name = req.Name.Trim();
         if (req.Role is not null)
         {
@@ -68,6 +73,19 @@ public sealed class UserService(IUserRepository users, IActivityRepository activ
         if (req.IsActive.HasValue) user.IsActive = req.IsActive.Value;
         if (!string.IsNullOrWhiteSpace(req.Password))
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password);
+
+        // The last-admin guard: demoting or disabling the only active
+        // Admin account would lock the Users page (and the whole admin
+        // level) away for good. Promote another Admin first.
+        if (user.Role == "Admin" && (roleAfter != "Admin" || !activeAfter))
+        {
+            var admins = await users.ListAsync();
+            var otherActiveAdmins = admins.Count(a => a.Role == "Admin" && a.IsActive && a.Id != user.Id);
+            if (otherActiveAdmins == 0)
+                throw ApiException.Conflict(
+                    "This is the only active Admin account — promote another admin to Admin before changing this one");
+        }
+
         await users.SaveAsync();
 
         var changes = new List<string>();
