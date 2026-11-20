@@ -14,6 +14,9 @@ public interface IEntryRepository
     /// notes contain the text; a numeric query also matches lend amounts.
     Task<List<Entry>> SearchAsync(string search, int take);
     Task<List<Entry>> ListForGroupAsync(int groupId, bool tracked = false);
+    /// One customer's lends (outsourced collaterals excluded, like the
+    /// views) — the Customers page fetches a history on expansion.
+    Task<List<Entry>> ListForCustomerAsync(int customerId);
     /// Several groups at once (the Outsourced page's rows) — NOT filtered
     /// by IsOutsourced: group operations need every lend of the group.
     Task<List<Entry>> ListForGroupsAsync(List<int> groupIds);
@@ -75,6 +78,12 @@ public sealed class EntryRepository(AmsDbContext db) : IEntryRepository
 
     public Task<List<Entry>> ListForGroupAsync(int groupId, bool tracked = false) =>
         GroupQuery(groupId, tracked).OrderBy(e => e.EntryDate).ThenBy(e => e.Id).ToListAsync();
+
+    public Task<List<Entry>> ListForCustomerAsync(int customerId) =>
+        ListableView()
+            .Where(e => e.CustomerId == customerId)
+            .OrderBy(e => e.EntryDate).ThenBy(e => e.Id)
+            .ToListAsync();
 
     /// Several groups at once (the Outsourced page's rows) — NOT filtered
     /// by IsOutsourced: group operations need every lend of the group.

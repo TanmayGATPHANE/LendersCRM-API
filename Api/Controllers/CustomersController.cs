@@ -19,6 +19,11 @@ public class CustomersController : ControllerBase
     public async Task<IActionResult> List([FromQuery] string? search) =>
         Ok(await _customers.ListAsync(search));
 
+    /// GET /api/customers/{id}/history — the expanded row's passbook.
+    [HttpGet("{id}/history")]
+    public async Task<IActionResult> History(int id) =>
+        Ok(await _customers.GetHistoryAsync(id));
+
     [HttpPost]
     [Authorize(Policy = "Writer")]
     public async Task<IActionResult> Create(NewCustomerRequest req)

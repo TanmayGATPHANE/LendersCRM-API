@@ -15,12 +15,35 @@ public interface ICashLedgerService
 /// rows are written by PaymentService / GroupService alongside the books
 /// (same transaction); this service handles the manual ± rows
 /// (outside the business: + in, − out) and reads the table for the page.
-public sealed class CashLedgerService(ICashLedgerRepository ledger, IActivityRepository activity) : ICashLedgerService
+public sealed class CashLedgerService(
+    ICashLedgerRepository ledger, IActivityRepository activity,
+    IEntryRepository entries) : ICashLedgerService
 {
     public async Task<List<CashLedgerItem>> ListAsync(DateOnly? from, DateOnly? to)
     {
         var list = await ledger.ListAsync(from, to);
-        return list.Select(ToItem).ToList();
+
+        // Label the window's rows with their collateral's customer + item
+        // (the group's earliest lend) — only the groups in this slice are
+        // read, never the whole entries table.
+        var groupIds = list.Where(x => x.GroupId is not null)
+            .Select(x => x.GroupId!.Value).Distinct().ToList();
+        var labels = new Dictionary<int, (string Customer, string Item)>();
+        if (groupIds.Count > 0)
+        {
+            var groupEntries = await entries.ListForGroupsAsync(groupIds);
+            foreach (var group in groupEntries.GroupBy(e => e.GroupId))
+            {
+                var primary = group.OrderBy(e => e.EntryDate).ThenBy(e => e.Id).First();
+                labels[group.Key] = (primary.Customer?.Name ?? "", primary.ItemDescription);
+            }
+        }
+
+        return list
+            .Select(x => ToItem(x, x.GroupId is int gid
+                ? labels.GetValueOrDefault(gid)
+                : default))
+            .ToList();
     }
 
     public Task<decimal> TotalAsync() => ledger.TotalAsync();
@@ -71,6 +94,8 @@ public sealed class CashLedgerService(ICashLedgerRepository ledger, IActivityRep
         await activity.SaveAsync();
     }
 
-    private static CashLedgerItem ToItem(CashLedger x) =>
-        new(x.Id, x.LedgerDate, x.Amount, x.Source, x.GroupId, x.ReferenceId, x.Notes);
+    private static CashLedgerItem ToItem(CashLedger x, (string Customer, string Item) label = default) =>
+        new(x.Id, x.LedgerDate, x.Amount, x.Source, x.GroupId, x.ReferenceId, x.Notes,
+            x.GroupId is null ? null : label.Customer,
+            x.GroupId is null ? null : label.Item);
 }

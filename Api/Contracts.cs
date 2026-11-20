@@ -86,7 +86,12 @@ public sealed record PaymentItem(int Id, int GroupId, DateOnly Date, decimal Amo
 /// the entry id); PartialReturn rows book a payment (ReferenceId = its
 /// PartialReturns.Id); each release posts TWO rows dated the release day;
 /// Manual rows are signed ± and are the only deletable kind.
-public sealed record CashLedgerItem(int Id, DateOnly Date, decimal Amount, string Source, int? GroupId, int? ReferenceId, string? Notes);
+/// Customer + item are joined server-side from the row's group (its
+/// earliest lend) so the Cash page never fetches the entries table just
+/// to label a window of ledger rows. Null on Manual (±) rows.
+public sealed record CashLedgerItem(
+    int Id, DateOnly Date, decimal Amount, string Source, int? GroupId, int? ReferenceId,
+    string? Notes, string? Customer, string? Item);
 
 /// One entry as the dashboard's table/grid expects it (mirrors the mock).
 public sealed record EntryItem
@@ -118,9 +123,40 @@ public sealed record EntryItem
 }
 
 public sealed record CustomerDetail(int Id, string Name, string Phone, string Address);
+
+/// GET /api/customers/{id}/history — one customer's whole passbook, fetched
+/// when their row expands. The Customers page used to download every entry
+/// and partial return in the book just to build these; now it asks for the
+/// one customer it is showing.
+public sealed record CustomerHistory(List<EntryItem> Entries, List<PaymentItem> Payments);
 public sealed record GroupItem(
     int GroupId, string Item, string Status,
     CustomerDetail Customer, List<EntryItem> Entries, List<PaymentItem> Payments);
+
+// ---- dashboard group list (§3.1) — server-side filter + sort + paging -----
+/// The dashboard's list query. Every knob is applied in SQL: the tab
+/// (all/active/released), the month/year of the group's FIRST lend, the
+/// search text (matched over the whole book, not the loaded page), the
+/// sort column/direction, and the skip/take window. Null/blank = no
+/// constraint; Take is clamped by the service.
+public sealed record GroupListQuery(
+    string? Tab, string? Month, string? Year, string? Search,
+    string? Sort, string? Dir, int Skip, int Take);
+
+/// One dashboard row, row-shaped exactly like the UI's CollateralGroup:
+/// the primary (earliest) lend, every sub with its FIFO `paid`, the
+/// group's partial returns, and the totals the table displays. Only the
+/// REQUESTED page is built, so a 50-year book never crosses the wire.
+public sealed record GroupRow(
+    int GroupId, EntryItem Primary, int CustomerId, string CustomerName,
+    string CustomerAddress, string Item, DateOnly Date, List<EntryItem> Subs,
+    List<PaymentItem> Partials, List<EntryItem> ActiveSubs,
+    decimal ActivePrincipal, decimal TotalPaid, decimal Outstanding,
+    decimal TotalAmount, string Status);
+
+/// One page + the total the filters match (for the count badge and the
+/// "Show more" footer) + every lending year (the year dropdown).
+public sealed record GroupsPage(List<GroupRow> Rows, int Total, List<string> Years);
 public sealed record ReleaseResult(int GroupId, int PrimaryEntryId, decimal? TotalCollected, int ReleasedCount);
 public sealed record InsightsResult(decimal TotalAmanat, decimal InterestEarned, decimal CashAvailable);
 

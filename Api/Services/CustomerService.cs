@@ -6,6 +6,9 @@ namespace AMS.Api.Services;
 public interface ICustomerService
 {
     Task<List<CustomerItem>> ListAsync(string? search);
+    /// One customer's lends + partial returns, FIFO-mapped like the
+    /// dashboard rows (loaded when their history row expands).
+    Task<CustomerHistory> GetHistoryAsync(int customerId);
     Task<Customer> CreateAsync(NewCustomerRequest req, Actor actor);
     /** Add Entry dialog (§4.1): returns the customer matching the name
         (case-insensitive, trimmed) or creates one with the typed address. */
@@ -15,8 +18,33 @@ public interface ICustomerService
 
 /** Customers: list with derived counts, create/update, find-or-create.
     Outstanding balances are computed, never stored (plan §3.2, §4.1, §5). */
-public sealed class CustomerService(ICustomerRepository customers, IActivityRepository activity) : ICustomerService
+public sealed class CustomerService(
+    ICustomerRepository customers, IActivityRepository activity,
+    IEntryRepository entries, IPaymentRepository payments) : ICustomerService
 {
+    public async Task<CustomerHistory> GetHistoryAsync(int customerId)
+    {
+        var lends = await entries.ListForCustomerAsync(customerId);
+        if (lends.Count == 0) return new CustomerHistory([], []);
+
+        var groupIds = lends.Select(e => e.GroupId).Distinct().ToList();
+        var groupPayments = await payments.ListForGroupsAsync(groupIds);
+
+        // FIFO allocation per group — the same paid/interest figures the
+        // dashboard rows show.
+        var paidMap = new Dictionary<int, decimal>();
+        foreach (var group in lends.GroupBy(e => e.GroupId))
+            foreach (var (entryId, covered) in Interest.AllocatePaid(
+                         group.ToList(),
+                         groupPayments.Where(p => p.GroupId == group.Key).Sum(p => p.Amount)))
+                paidMap[entryId] = covered;
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        return new CustomerHistory(
+            lends.Select(e => EntryMapper.ToItem(e, paidMap.GetValueOrDefault(e.Id), today)).ToList(),
+            groupPayments.Select(PaymentMapper.ToItem).ToList());
+    }
+
     public async Task<List<CustomerItem>> ListAsync(string? search)
     {
         var list = await customers.ListAsync(search);

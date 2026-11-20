@@ -31,6 +31,8 @@ builder.Services.AddScoped<IEntryRepository, EntryRepository>();
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
 builder.Services.AddScoped<ICashLedgerRepository, CashLedgerRepository>();
 builder.Services.AddScoped<IActivityRepository, ActivityRepository>();
+builder.Services.AddScoped<IGroupQueryRepository, GroupQueryRepository>();
+builder.Services.AddScoped<IInsightsRepository, InsightsRepository>();
 builder.Services.AddScoped<IImportRepository, ImportRepository>();
 builder.Services.AddScoped<IOutsourceRepository, OutsourceRepository>();
 builder.Services.AddScoped<IArchiveRepository, ArchiveRepository>();

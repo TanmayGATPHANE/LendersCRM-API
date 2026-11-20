@@ -24,6 +24,17 @@ public class GroupsController : ControllerBase
         _deletes = deletes;
     }
 
+    /// GET /api/groups?tab=&month=&year=&search=&sort=&dir=&skip=&take=
+    /// — the dashboard's paged collateral rows. Filters, sort and paging
+    /// are applied in SQL, so only the requested page leaves the server.
+    [HttpGet]
+    public async Task<IActionResult> List(
+        [FromQuery] string? tab, [FromQuery] string? month, [FromQuery] string? year,
+        [FromQuery] string? search, [FromQuery] string? sort, [FromQuery] string? dir,
+        [FromQuery] int skip = 0, [FromQuery] int take = 50) =>
+        Ok(await _groups.ListAsync(
+            new GroupListQuery(tab, month, year, search, sort, dir, skip, take)));
+
     [HttpGet("{id}")]
     public async Task<IActionResult> Get(int id) => Ok(await _groups.GetAsync(id));
 

@@ -5,6 +5,8 @@ namespace AMS.Api.Services;
 
 public interface IGroupService
 {
+    /// One page of dashboard rows, filtered/sorted/paged in SQL (§3.1).
+    Task<GroupsPage> ListAsync(GroupListQuery query);
     Task<GroupItem> GetAsync(int groupId);
     Task MoveCustomerAsync(int groupId, int customerId, Actor actor);
     Task<ReleaseResult> ReleaseAsync(int groupId, ReleaseRequest req, Actor actor);
@@ -14,8 +16,68 @@ public interface IGroupService
     payments) to another customer, release it (plan §4.2, §4.3, §6). */
 public sealed class GroupService(
     IEntryRepository entries, IPaymentRepository payments, ICustomerRepository customers,
-    ICashLedgerRepository cash, IActivityRepository activity) : IGroupService
+    ICashLedgerRepository cash, IActivityRepository activity,
+    IGroupQueryRepository groupQuery) : IGroupService
 {
+    public async Task<GroupsPage> ListAsync(GroupListQuery query)
+    {
+        var (ids, total) = await groupQuery.PageGroupIdsAsync(query);
+        var rows = await BuildRowsAsync(ids);
+        var years = await groupQuery.ListYearsAsync();
+        return new GroupsPage(rows, total, years);
+    }
+
+    /// Build the full row content for the page's group ids only — the
+    /// exact figures the old client-side buildGroups produced (earliest
+    /// lend as primary, FIFO-allocated partials, one interest per lend).
+    private async Task<List<GroupRow>> BuildRowsAsync(List<int> ids)
+    {
+        if (ids.Count == 0) return [];
+
+        var pageEntries = await entries.ListForGroupsAsync(ids);
+        var pagePayments = await payments.ListForGroupsAsync(ids);
+        var byGroup = pageEntries
+            .GroupBy(e => e.GroupId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(e => e.EntryDate).ThenBy(e => e.Id).ToList());
+        var paysByGroup = pagePayments
+            .GroupBy(p => p.GroupId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(p => p.PaymentDate).ThenBy(p => p.Id).ToList());
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var rows = new List<GroupRow>(ids.Count);
+        foreach (var id in ids)
+        {
+            if (!byGroup.TryGetValue(id, out var subs) || subs.Count == 0) continue;
+            var groupPayments = paysByGroup.GetValueOrDefault(id) ?? [];
+            var totalPaid = groupPayments.Sum(p => p.Amount);
+            var paidMap = Interest.AllocatePaid(subs, totalPaid);
+            var items = subs
+                .Select(e => EntryMapper.ToItem(e, paidMap.GetValueOrDefault(e.Id), today))
+                .ToList();
+            var primary = items[0];
+            var active = items.Where(i => i.Status == "Active").ToList();
+            var activePrincipal = active.Sum(i => i.Amount);
+
+            rows.Add(new GroupRow(
+                GroupId: id,
+                Primary: primary,
+                CustomerId: primary.CustomerId,
+                CustomerName: primary.CustomerName,
+                CustomerAddress: primary.CustomerAddress,
+                Item: primary.Item,
+                Date: primary.Date,
+                Subs: items,
+                Partials: groupPayments.Select(PaymentMapper.ToItem).ToList(),
+                ActiveSubs: active,
+                ActivePrincipal: activePrincipal,
+                TotalPaid: totalPaid,
+                Outstanding: activePrincipal - totalPaid,
+                TotalAmount: items.Sum(i => i.Amount),
+                Status: active.Count > 0 ? "Active" : "Released"));
+        }
+        return rows;
+    }
+
     public async Task<GroupItem> GetAsync(int groupId)
     {
         var groupEntries = await entries.ListForGroupAsync(groupId);
