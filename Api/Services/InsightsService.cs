@@ -11,8 +11,8 @@ public interface IInsightsService
     call, so any add/edit/payment/release shows fresh values as soon as
     the page refetches (plan §3.1, §6). The tab slices the books, the
     FROM/TO window (the dashboard's month/year filters) slices them by
-    the LEND date — every tile computes over the SAME rows the table
-    below shows:
+    the LEND date — the Amanat and Interest tiles compute over the SAME
+    rows the table below shows; the cash tile deliberately does not:
 
       Total Amanat        — the SUM OF LEND AMOUNTS on the tab's rows:
                             all = every lend on the books, active = the
@@ -27,10 +27,13 @@ public interface IInsightsService
                             (basis: amount − FIFO-allocated partials);
                             released: Σ interest frozen on the released
                             lends.
-      Total Cash Available— SUM(CashLedger.Amount) inside the window —
+      Total Cash Available— SUM(CashLedger.Amount) over the WHOLE table —
                             lends book −, partial returns and the two
                             release legs book +, manual ± books itself.
-                            No window = the whole cash table. */
+                            The tab and the FROM/TO window touch the other
+                            two tiles only: the cash actually in hand is a
+                            property of the books, not of the current view,
+                            so filtering the table must never change it. */
 public sealed class InsightsService(
     IEntryRepository entries, IPaymentRepository payments, ICashLedgerRepository cash) : IInsightsService
 {
@@ -38,25 +41,33 @@ public sealed class InsightsService(
     {
         var slice = (tab ?? "").Trim().ToLowerInvariant();
 
-        // The window (the dashboard's month/year filters) slices by the
-        // LEND date — the same axis the table filters, so tiles and
-        // table always agree on which rows belong.
-        var allEntries = (await entries.ListAsync(status: null, search: null))
-            .Where(e => (!from.HasValue || e.EntryDate >= from)
-                     && (!to.HasValue || e.EntryDate <= to))
-            .ToList();
+        // The window follows the GROUP — a collateral belongs to it through
+        // its FIRST lend (the dashboard table row's date), and every lend
+        // of it counts with it even when one is dated outside the window.
+        // Windowing per ENTRY instead made multi-year collaterals leak
+        // into the wrong year's tiles while the table correctly showed
+        // them elsewhere.
+        var allEntries = await entries.ListAsync(status: null, search: null);
         var allPayments = await payments.ListAsync();
-        var ledger = await cash.ListAsync(from, to);
+        var inWindow = allEntries
+            .GroupBy(e => e.GroupId)
+            .Where(g =>
+            {
+                var first = g.Min(e => e.EntryDate);
+                return (!from.HasValue || first >= from) && (!to.HasValue || first <= to);
+            })
+            .SelectMany(g => g)
+            .ToList();
 
         // The tab's rows — Total Amanat is the plain Σ AmountLend over
         // them (§3.1); the interest tile is the only tab-specific slice.
-        var activeEntries = allEntries.Where(e => e.Status == "Active").ToList();
-        var releasedEntries = allEntries.Where(e => e.Status == "Released").ToList();
+        var activeEntries = inWindow.Where(e => e.Status == "Active").ToList();
+        var releasedEntries = inWindow.Where(e => e.Status == "Released").ToList();
         var tabEntries = slice == "released"
             ? releasedEntries
             : slice == "active"
                 ? activeEntries
-                : allEntries;
+                : inWindow;
         var interestEarned = slice == "active"
             ? AccruedLive(activeEntries, allPayments)
             : slice == "released"
@@ -68,12 +79,15 @@ public sealed class InsightsService(
                 : releasedEntries.Sum(e => e.InterestCollected ?? 0m)
                   + AccruedLive(activeEntries, allPayments);
 
+        // Total Cash Available is the whole cash table's SUM — never
+        // sliced by the tab or the month/year window. What sits in the
+        // drawer does not shrink because the table is showing one month.
+        var cashAvailable = await cash.TotalAsync();
+
         return new InsightsResult(
             TotalAmanat: tabEntries.Sum(e => e.AmountLend),
             InterestEarned: interestEarned,
-            // The cash inside the window when one is selected; the whole
-            // cash table when the dashboard shows all months + all years.
-            CashAvailable: ledger.Sum(x => x.Amount));
+            CashAvailable: cashAvailable);
     }
 
     /** Interest accruing live on active lends — FIFO share of each
