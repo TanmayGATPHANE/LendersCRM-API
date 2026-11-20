@@ -147,18 +147,26 @@ public sealed record CustomerReportRow(
 // ---- Excel import (plan §4.7) — one lending book sheet per file ----
 /// One money row of a parsed sheet: a lend (Amount > 0) or a partial
 /// return (Amount < 0 in the sheet, sent positive here). Row = the sheet
-/// row it came from, for the preview table and the Notes stamp.
-public sealed record ImportPreviewRow(DateOnly Date, decimal Amount, int Row, string? Notes = null);
+/// row it came from, for the preview table and the Notes stamp. For a
+/// RELEASED sheet, every row also carries its release day and interest.
+public sealed record ImportPreviewRow(
+    DateOnly Date, decimal Amount, int Row, string? Notes = null,
+    DateOnly? ReleasedDate = null, decimal? Interest = null);
 /// One collateral parsed from a sheet: merged Name+Item cells make the
 /// head row and every continuation row share one collateral (sub-lends).
-/// Unmerged rows are their own collateral, even for the same name.
+/// Unmerged rows are their own collateral, even for the same name. Groups
+/// from a RELEASED sheet carry the release day and the interest the
+/// collateral brought back (collected on the sheet).
 public sealed record ImportPreviewGroup(
     string Name, string Item, int Row,
-    List<ImportPreviewRow> Lends, List<ImportPreviewRow> Returns);
+    List<ImportPreviewRow> Lends, List<ImportPreviewRow> Returns,
+    DateOnly? ReleasedDate = null, decimal? InterestCollected = null, decimal? TotalCollected = null);
 /// The whole parsed workbook: what the preview renders and the commit
-/// executes — the two endpoints parse the same bytes the same way.
+/// executes — the two endpoints parse the same bytes the same way. Kind
+/// tells the sheet the rows came from ("Active" lending book, or
+/// "Released" for the already-returned book).
 public sealed record ImportPreview(
-    string FileName, List<string> Sheets, string SheetUsed,
+    string FileName, List<string> Sheets, string SheetUsed, string Kind,
     List<ImportPreviewGroup> Groups, List<string> Warnings);
 
 /// What a committed import actually wrote (skipped rows were already

@@ -12,6 +12,10 @@ public class Entry
     /// The lending YEAR, stored (business requirement): filters/reports key
     /// off the year directly instead of re-deriving it from the date.
     public int EntryYear { get; set; }
+    /// §4.9 — stamped TRUE in the same transaction that moves the row to
+    /// EntriesDeleted (the deletion flag; the working tables never keep a
+    /// deleted row, so it marks the moment only).
+    public bool IsDeleted { get; set; }
     /// What the customer handed over, e.g. "Gold chain (12g)".
     public string ItemDescription { get; set; } = "";
     public decimal AmountLend { get; set; }

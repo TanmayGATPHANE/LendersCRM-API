@@ -15,15 +15,28 @@ public class GroupsController : ControllerBase
 {
     private readonly IGroupService _groups;
     private readonly IPaymentService _payments;
+    private readonly IDeletionService _deletes;
 
-    public GroupsController(IGroupService groups, IPaymentService payments)
+    public GroupsController(IGroupService groups, IPaymentService payments, IDeletionService deletes)
     {
         _groups = groups;
         _payments = payments;
+        _deletes = deletes;
     }
 
     [HttpGet("{id}")]
     public async Task<IActionResult> Get(int id) => Ok(await _groups.GetAsync(id));
+
+    /// Delete the WHOLE collateral (§4.9) — every active lend archived to
+    /// EntriesDeleted, their cash rows removed in the same save. 409 when
+    /// released or carrying recorded returns.
+    [HttpDelete("{id}")]
+    [Authorize(Policy = "Writer")]
+    public async Task<IActionResult> Delete(int id, [FromQuery] string? reason)
+    {
+        await _deletes.DeleteGroupAsync(id, reason, CurrentUser.Actor(User));
+        return NoContent();
+    }
 
     /// Partial return against a whole collateral group (§4.6).
     [HttpPost("{id}/payments")]

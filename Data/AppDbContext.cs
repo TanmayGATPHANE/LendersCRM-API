@@ -36,6 +36,7 @@ public class AmsDbContext : DbContext
     public DbSet<CashLedger> CashLedger => Set<CashLedger>();
     public DbSet<ActivityLog> ActivityLog => Set<ActivityLog>();
     public DbSet<OutsourcedItem> OutsourcedItems => Set<OutsourcedItem>();
+    public DbSet<DeletedEntry> EntriesDeleted => Set<DeletedEntry>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -72,6 +73,10 @@ public class AmsDbContext : DbContext
 
         mb.Entity<Entry>(e =>
         {
+            // §4.9 — Entries carries the deletion trigger; declaring it makes
+            // EF emit OUTPUT INTO instead of bare OUTPUT (SQL Server refuses
+            // bare OUTPUT on trigger-bearing tables).
+            e.ToTable(tb => tb.HasTrigger("trg_Entries_MoveDeleted"));
             e.Property(x => x.ItemDescription).HasMaxLength(500);
             e.Property(x => x.AmountLend).HasPrecision(12, 2);
             e.Property(x => x.InterestRate).HasPrecision(5, 2);
@@ -125,6 +130,26 @@ public class AmsDbContext : DbContext
             // in-and-out history reads by GroupId.
             e.HasIndex(x => x.GroupId);
             e.HasIndex(x => x.OutsourceDate);
+        });
+
+        mb.Entity<DeletedEntry>(e =>
+        {
+            // The archived copy of a deleted entry — same money precision
+            // as Entries, the ORIGINAL entry id kept as the key, and the
+            // deletion audit on top.
+            e.ToTable("EntriesDeleted");
+            e.Property(x => x.AmountLend).HasPrecision(12, 2);
+            e.Property(x => x.InterestRate).HasPrecision(5, 2);
+            e.Property(x => x.AmountReturned).HasPrecision(12, 2);
+            e.Property(x => x.InterestCollected).HasPrecision(12, 2);
+            e.Property(x => x.TotalCollected).HasPrecision(12, 2);
+            e.Property(x => x.Status).HasMaxLength(10);
+            e.Property(x => x.ItemDescription).HasMaxLength(500);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            e.Property(x => x.DeleteReason).HasMaxLength(500);
+            e.Property(x => x.Id).ValueGeneratedNever(); // THE original id, not a new one
+            e.HasIndex(x => x.GroupId);
+            e.HasIndex(x => x.DeletedAtUtc);
         });
     }
 }

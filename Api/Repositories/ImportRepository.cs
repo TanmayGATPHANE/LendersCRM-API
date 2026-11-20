@@ -17,6 +17,9 @@ namespace AMS.Api.Repositories;
 public interface IImportRepository
 {
     Task<ImportResult> CommitAsync(ImportPreview data, decimal rate, Actor actor);
+    /// Which of the given lending years already have entries in the
+    /// database — the one-import-per-year gate (§4.7) reads this.
+    Task<List<int>> YearsAlreadyPresentAsync(IEnumerable<int> years);
     Task SaveActivityAsync(Actor actor, string details);
 }
 
@@ -79,7 +82,17 @@ public sealed class ImportRepository(AmsDbContext db, IActivityRepository activi
             else result.CustomersFound++;
 
             // The group: first lend FORGES the GroupId (insert → id →
-            // stamp), the rest join it as sub-lends.
+            // stamp), the rest join it as sub-lends. A group from a
+            // RELEASED sheet was returned long ago: it lands straight in
+            // its closed state (Status Released, the released-on day, its
+            // equal share of the release's interest per lend, TotalCollected
+            // = lends + interest on the primary). Released imports stay
+            // cash-silent like every import (§4.7).
+            var releasedOn = g.ReleasedDate;
+            var earned = g.InterestCollected ?? 0m;
+            var collected = releasedOn is null
+                ? (decimal?)null
+                : g.TotalCollected ?? (g.Lends.Sum(l => l.Amount) + earned);
             var primary = new Entry
             {
                 CustomerId = customer.Id,
@@ -87,7 +100,15 @@ public sealed class ImportRepository(AmsDbContext db, IActivityRepository activi
                 ItemDescription = g.Item.Trim().Length > 0 ? g.Item.Trim() : "(no item in sheet)",
                 AmountLend = g.Lends[0].Amount,
                 InterestRate = rate > 0 ? rate : null,
-                Status = "Active",
+                Status = releasedOn is null ? "Active" : "Released",
+                ReleasedDate = releasedOn,
+                // The InterestCollected figure rides PER LEND (the parser's
+                // equal division when a release's interest covered several).
+                InterestCollected = releasedOn is null ? null : (g.Lends[0].Interest ?? 0m),
+                AmountReturned = releasedOn is null
+                    ? null
+                    : g.Lends[0].Amount + (g.Lends[0].Interest ?? 0m),
+                TotalCollected = releasedOn is null ? null : collected,
                 Notes = headStamp,
                 CreatedByUserId = actor.Id,
             };
@@ -104,7 +125,10 @@ public sealed class ImportRepository(AmsDbContext db, IActivityRepository activi
                     ItemDescription = primary.ItemDescription,
                     AmountLend = lend.Amount,
                     InterestRate = primary.InterestRate,
-                    Status = "Active",
+                    Status = primary.Status,
+                    ReleasedDate = primary.ReleasedDate,
+                    InterestCollected = releasedOn is null ? 0m : (lend.Interest ?? 0m),
+                    AmountReturned = releasedOn is null ? null : lend.Amount + (lend.Interest ?? 0m),
                     Notes = LendStamp(data, lend.Row),
                     CreatedByUserId = actor.Id,
                 });
@@ -145,6 +169,13 @@ public sealed class ImportRepository(AmsDbContext db, IActivityRepository activi
 
         return result;
     }
+
+    public Task<List<int>> YearsAlreadyPresentAsync(IEnumerable<int> years) =>
+        db.Entries.AsNoTracking()
+            .Where(e => years.Contains(e.EntryYear))
+            .Select(e => e.EntryYear)
+            .Distinct()
+            .ToListAsync();
 
     public async Task SaveActivityAsync(Actor actor, string details)
     {

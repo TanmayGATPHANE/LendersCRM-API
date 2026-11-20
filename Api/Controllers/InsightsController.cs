@@ -13,8 +13,11 @@ public class InsightsController : ControllerBase
 
     public InsightsController(IInsightsService insights) => _insights = insights;
 
-    /// ?tab=all (default) | active | released — the tab shapes the tiles.
+    /// ?tab=all (default) | active | released — the tab shapes the tiles;
+    /// ?from=&to= (the dashboard's month/year window) slices every tile by
+    /// the LEND date.
     [HttpGet("/api/insights")]
-    public async Task<IActionResult> Get([FromQuery] string? tab) =>
-        Ok(await _insights.GetAsync(tab));
+    public async Task<IActionResult> Get(
+        [FromQuery] string? tab, [FromQuery] DateOnly? from, [FromQuery] DateOnly? to) =>
+        Ok(await _insights.GetAsync(tab, from, to));
 }

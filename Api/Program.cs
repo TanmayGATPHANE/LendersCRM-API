@@ -33,6 +33,7 @@ builder.Services.AddScoped<ICashLedgerRepository, CashLedgerRepository>();
 builder.Services.AddScoped<IActivityRepository, ActivityRepository>();
 builder.Services.AddScoped<IImportRepository, ImportRepository>();
 builder.Services.AddScoped<IOutsourceRepository, OutsourceRepository>();
+builder.Services.AddScoped<IArchiveRepository, ArchiveRepository>();
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -48,6 +49,7 @@ builder.Services.AddScoped<ISearchService, SearchService>();
 builder.Services.AddScoped<IActivityService, ActivityService>();
 builder.Services.AddScoped<IExcelImportService, ExcelImportService>();
 builder.Services.AddScoped<IOutsourceService, OutsourceService>();
+builder.Services.AddScoped<IDeletionService, DeletionService>();
 
 // ── HTTP plumbing ─────────────────────────────────────────────────────────
 builder.Services.AddControllers();
